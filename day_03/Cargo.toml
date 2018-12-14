@@ -1,0 +1,13 @@
+[package]
+name = "day_03"
+version = "0.1.0"
+authors = ["Charlie Ozinga <ozchaz@gmail.com>"]
+edition = "2018"
+build = "build.rs"
+
+[dependencies]
+lalrpop-util = "0.16"
+regex = "0.2"
+
+[build-dependencies]
+lalrpop = "0.16"

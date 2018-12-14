@@ -1,0 +1,11 @@
+use std::str::FromStr;
+use crate::claim::Claim;
+
+#[LALR]
+grammar;
+
+pub Line: Claim =
+  "#" <id:Int> "@" <l:Int> "," <t:Int> ":" <w:Int> "x" <h:Int> =>
+    Claim::new(id, l, t, w, h);
+
+Int: u32 = r"[0-9]+" => u32::from_str(<>).unwrap();
