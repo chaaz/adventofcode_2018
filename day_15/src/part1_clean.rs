@@ -1,4 +1,4 @@
-use std::iter::repeat;
+use std::iter::{once, repeat};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::cmp::Ordering;
@@ -8,7 +8,7 @@ pub fn run() {
   let mut map = Map::from_bytes(&mut content);
 
   let rounds = repeat(|| ()).enumerate()
-    .map(|(i, _)| { println!("after {} rounds", i); map.print(); map.round() })
+    .map(|(_, _)| map.round())
     .take_while(|b| !b)
     .count();
   let hp = map.total_hp() as usize;
@@ -92,7 +92,7 @@ impl<'a> Map<'a> {
 
     let mut units = Vec::new();
     EnumChars::new(&rows)
-      .filter(is_unit)
+      .filter(|(_, pt)| pt == &b'E' || pt == &b'G')
       .for_each(|(pt, u)| units.push((pt, Unit::init(u))));
     for (pt, _) in &units { rows[pt.y][pt.x] = b'.'; }
 
@@ -136,9 +136,7 @@ impl<'a> Map<'a> {
     self.units.sort_by_key(|(pt, _)| pt.clone());
     let pts = self.units.iter().map(|(pt, _)| pt).cloned().collect::<Vec<_>>();
     for pt in pts {
-      if self.turn(&pt) {
-        return true;
-      }
+      if self.turn(&pt) { return true; }
     }
     false
   }
@@ -146,7 +144,7 @@ impl<'a> Map<'a> {
   fn turn(&mut self, pt: &Point) -> bool {
     let unit = match self.units.iter().find(|v| &v.0 == pt).map(|v| &v.1) {
       Some(unit) => unit,
-      None => return false
+      None => return false    // we've been killed, probably
     };
 
     if !self.any_enemies(&unit) { return true; }
@@ -174,7 +172,7 @@ impl<'a> Map<'a> {
 
   fn find_best_step(&self, pt: &Point, unit: &Unit) -> Option<Point> {
     let ranges = self.ranges(unit);
-    let best = self.astar(pt, &ranges);
+    let best = self.a_star(pt, &ranges);
     best.and_then(|p| p.get(1).cloned())
   }
 
@@ -217,54 +215,43 @@ impl<'a> Map<'a> {
       .map(|(upt, _)| upt.clone())
   }
 
-  fn astar(&self, pt: &Point, ranges: &HashSet<Point>) -> Option<Vec<Point>> {
+  fn a_star(&self, pt: &Point, ranges: &HashSet<Point>) -> Option<Vec<Point>> {
+    if ranges.is_empty() { return None; }
+
     let mut nodes = self.nodes(pt, ranges);
-    let mut open: HashMap<Point, HashSet<Point>> =
-      ranges.iter().map(|r| (r.clone(), HashSet::new())).collect();
-    for r in ranges { open.get_mut(r).unwrap().insert(pt.clone()); }
-    let mut closed: HashMap<Point, HashSet<Point>> =
-      ranges.iter().map(|r| (r.clone(), HashSet::new())).collect();
+    let mut open: HashSet<_> = once(pt.clone()).collect();
+    let mut closed = HashSet::new();
 
-    while open.iter().any(|(_, o)| !o.is_empty()) {
-      let fold: Vec<_> = open
+    while !open.is_empty() {
+      let current = open
         .iter()
-        .filter_map(|(r, s)| {
-          s.iter()
-            .min_by(|l0, l1| nearest(*l0, *l1, &nodes, r))
-            .map(|b| (r, b.clone()))
-        })
-        .map(|(r, b)| (r.clone(), b.clone(), nodes[&b].f[r]))
-        .collect();
+        .min_by(|l0, l1| nearest(*l0, *l1, &nodes))
+        .unwrap()
+        .clone();
 
-      let (r, current, _): &(Point, Point, _) =
-      fold.iter().min_by(|(r0, b0, v0), (r1, b1, v1)| {
-        nearest_pt_val_rng(r0, b0, *v0, r1, b1, *v1)
-      }).unwrap();
-
-      let cur_g = nodes[current].g;
-      if ranges.contains(current) {
-        return Some(reconstruct(current, &nodes));
+      let cur_g = nodes[&current].g;
+      if ranges.contains(&current) {
+        return Some(reconstruct(&current, &nodes));
       }
 
-      open.get_mut(r).unwrap().remove(current);
-      closed.get_mut(r).unwrap().insert(current.clone());
+      open.remove(&current);
+      closed.insert(current.clone());
 
-      for neighbor in neighbors(current, &nodes, &self.units) {
-        let neighbor: Point = neighbor;
+      for neighbor in neighbors(&current, &nodes, &self.units) {
         let neighbor_node = nodes.get_mut(&neighbor).unwrap();
-        if closed[r].contains(&neighbor) { continue; }
+        if closed.contains(&neighbor) { continue; }
         let neighbor_g = cur_g + 1;
-        open.get_mut(r).unwrap().insert(neighbor.clone());
+        open.insert(neighbor.clone());
         if neighbor_g > neighbor_node.g { continue; }
         if neighbor_g == neighbor_node.g
-            && neighbor_node.prev.as_ref().unwrap() < current {
-          neighbor_node.f.insert(r.clone(), neighbor_g + r.dist(&neighbor));
+            && neighbor_node.prev.as_ref().unwrap() < &current {
           continue;
         }
 
-        neighbor_node.prev = Some((*current).clone());
+        neighbor_node.prev = Some(current.clone());
         neighbor_node.g = neighbor_g;
-        neighbor_node.f.insert((*r).clone(), neighbor_g + r.dist(&neighbor));
+        neighbor_node.f = neighbor_g +
+          ranges.iter().map(|r| r.dist(&neighbor)).min().unwrap();
       }
     }
 
@@ -279,9 +266,9 @@ impl<'a> Map<'a> {
           prev: None,
           g: if &upt == pt { 0 } else { std::usize::MAX },
           f: if &upt == pt {
-            ranges.iter().map(|p| (p.clone(), p.dist(pt))).collect()
+            ranges.iter().map(|r| r.dist(pt)).min().unwrap()
           } else {
-            ranges.iter().map(|p| (p.clone(), std::usize::MAX)).collect()
+            std::usize::MAX
           }
         }))
       } else {
@@ -351,32 +338,11 @@ struct Node {
   pub loc: Point,
   pub prev: Option<Point>,
   pub g: usize,
-  pub f: HashMap<Point, usize>
+  pub f: usize,
 }
 
-fn nearest(c0: &Point, c1: &Point, nodes: &Nodes, r: &Point) -> Ordering {
-  nearest_pt_val(c0, nodes[c0].f[r], c1, nodes[c1].f[r])
-}
-
-fn nearest_pt_val_rng(r0: &Point, c0: &Point, min0: usize,
-                      r1: &Point, c1: &Point, min1: usize)
--> Ordering {
-  // TODO: handle this edge case better
-  //
-  // #############
-  // #.G1.#...2G #
-  // ####..E######
-  //    #####
-  //
-  // Range 1 and 2 are equidistant (4 steps), but 1 has priority reading
-  // order, so E should go left; even though the first **step** towards
-  // 2 is up, which has priority reading order over the first **step**
-  // towards 1.
-
-  match nearest_pt_val(c0, min0, c1, min1) {
-    Ordering::Equal => r0.cmp(r1),
-    other => other
-  }
+fn nearest(c0: &Point, c1: &Point, nodes: &Nodes) -> Ordering {
+  nearest_pt_val(c0, nodes[c0].f, c1, nodes[c1].f)
 }
 
 fn nearest_pt_val(c0: &Point, min0: usize,
@@ -385,10 +351,6 @@ fn nearest_pt_val(c0: &Point, min0: usize,
     Ordering::Equal => c0.cmp(c1),
     other => other
   }
-}
-
-fn is_unit(ptu: &(Point, u8)) -> bool {
-  ptu.1 == b'E' || ptu.1 == b'G'
 }
 
 fn reconstruct(loc: &Point, nodes: &Nodes) -> Vec<Point> {
