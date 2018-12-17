@@ -1,5 +1,5 @@
-mod part2;
+mod part1_clean;
 
 fn main() {
-  part2::run();
+  part1_clean::run();
 }
