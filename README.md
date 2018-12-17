@@ -15,6 +15,10 @@ I focused on a balance between code readability and writing speed: I
 want to get these done quickly, but I also want to come back at some
 point and figure out what I did.
 
+There is a README for each day, which is scraped directly from the
+website itself to describe the problem being solved. All rights, credit,
+blame, etc. goes to that website and its author(s).
+
 ## Comments
 
 ### Day 1
