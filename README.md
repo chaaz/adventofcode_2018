@@ -11,7 +11,7 @@ Each solution was created via `cargo init day_NN --vcs none`, and
 (usually) have an independent `src/part1.rs` and `src/part2.rs`, so you
 can easily see what was changed to finish the second half.
 
-I focused on a balance between code-readibility and writing speed: I
+I focused on a balance between code readability and writing speed: I
 want to get these done quickly, but I also want to come back at some
 point and figure out what I did.
 
@@ -98,3 +98,10 @@ still too long.
 I probably should have been using slice comparison for earlier problems.
 The `last_dig` check is purely for opimization, but significantly speeds
 up the calculation. (Down to ~3.5 seconds on my box in debug)
+
+### Day 15
+
+Compulsively found the pathfinding algorithm with optimal worst-case:
+the modified _A\*_ here; but lost readability, writing time, best-case
+and avarage-case time, sanity in trade. Even missed some edge cases
+(which fortunately didn't come up in my problem input).
