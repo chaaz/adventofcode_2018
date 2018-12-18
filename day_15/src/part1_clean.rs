@@ -1,3 +1,5 @@
+use std::thread::sleep;
+use std::time::Duration;
 use std::iter::{once, repeat};
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -7,8 +9,9 @@ pub fn run() {
   let mut content = include_bytes!("input.txt").to_vec();
   let mut map = Map::from_bytes(&mut content);
 
-  let rounds = repeat(|| ()).enumerate()
-    .map(|(_, _)| map.round())
+  let rounds = repeat(|| ())
+    .enumerate()
+    .map(|_| { sleep(Duration::new(0, 500_000_000)); map.print(); map.round() })
     .take_while(|b| !b)
     .count();
   let hp = map.total_hp() as usize;
@@ -109,20 +112,26 @@ impl<'a> Map<'a> {
 
     for (y, row) in rows.iter().enumerate() {
       print!("{}", std::str::from_utf8(row).unwrap());
-      for (x, ch) in row.iter().enumerate() {
-        match ch {
-          b'E' => print!(" E({})", self.find(&Point::new(x, y)).hp),
-          b'G' => print!(" G({})", self.find(&Point::new(x, y)).hp),
-          _ => ()
-        }
-      }
+      self.print_hps(row, y);
       println!("");
     }
   }
 
-  fn find(&self, pt: &Point) -> &Unit {
-    self.units.iter().find(|(upt, _)| upt == pt).map(|(_, u)| u).unwrap()
+  fn print_hps(&self, row: &[u8], y: usize) {
+    for (x, ch) in row.iter().enumerate() {
+      match ch {
+        b'E' => print!(" E({})", self.find_ok(&Point::new(x, y)).hp),
+        b'G' => print!(" G({})", self.find_ok(&Point::new(x, y)).hp),
+        _ => ()
+      }
+    }
   }
+
+  fn find(&self, pt: &Point) -> Option<&Unit> {
+    self.units.iter().find(|(upt, _)| upt == pt).map(|(_, u)| u)
+  }
+
+  fn find_ok(&self, pt: &Point) -> &Unit { self.find(pt).unwrap() }
 
   fn find_mut(&mut self, pt: &Point) -> &mut Unit {
     self.units.iter_mut().find(|(upt, _)| upt == pt).map(|(_, u)| u).unwrap()
@@ -142,36 +151,40 @@ impl<'a> Map<'a> {
   }
 
   fn turn(&mut self, pt: &Point) -> bool {
-    let unit = match self.units.iter().find(|v| &v.0 == pt).map(|v| &v.1) {
-      Some(unit) => unit,
-      None => return false    // we've been killed, probably
+    let enemy_team = match self.find(pt) {
+      Some(unit) => unit.enemy_team(),
+      None => return false    // we've been killed
     };
 
-    if !self.any_enemies(&unit) { return true; }
+    if !self.any_enemies(enemy_team) {
+      true
+    } else {
+      self.turn_action(pt, enemy_team);
+      false
+    }
+  }
 
-    if let Some(loc) = self.find_best_adj_enemy(pt) {
+  fn turn_action(&mut self, pt: &Point, enemy_team: u8) {
+    if let Some(loc) = self.find_best_adj_enemy(pt, enemy_team) {
       self.attack(pt, &loc);
     } else {
-      if let Some(step) = self.find_best_step(pt, &unit) {
+      if let Some(step) = self.find_best_step(pt, enemy_team) {
         let pt = self.take_step(pt, step);
-        if let Some(loc) = self.find_best_adj_enemy(&pt) {
+        if let Some(loc) = self.find_best_adj_enemy(&pt, enemy_team) {
           self.attack(&pt, &loc);
         }
       }
     }
-
-    false
   }
 
   fn winner(&self) -> u8 { self.units[0].1.team }
 
-  fn any_enemies(&self, unit: &Unit) -> bool {
-    let enemy = unit.enemy_team();
+  fn any_enemies(&self, enemy: u8) -> bool {
     self.units.iter().any(|(_, u)| u.team == enemy)
   }
 
-  fn find_best_step(&self, pt: &Point, unit: &Unit) -> Option<Point> {
-    let ranges = self.ranges(unit);
+  fn find_best_step(&self, pt: &Point, enemy_team: u8) -> Option<Point> {
+    let ranges = self.ranges(enemy_team);
     let best = self.a_star(pt, &ranges);
     best.and_then(|p| p.get(1).cloned())
   }
@@ -182,8 +195,8 @@ impl<'a> Map<'a> {
   }
 
   fn attack(&mut self, attacker: &Point, target: &Point) {
-    let power = self.find(attacker).power;
-    let hp = self.find(target).hp;
+    let power = self.find_ok(attacker).power;
+    let hp = self.find_ok(target).hp;
 
     if hp > power {
       self.find_mut(target).hp -= power;
@@ -192,18 +205,19 @@ impl<'a> Map<'a> {
     }
   }
 
-  fn ranges(&self, unit: &Unit) -> HashSet<Point> {
-    let enemy_team = unit.enemy_team();
+  fn ranges(&self, enemy_team: u8) -> HashSet<Point> {
     self.units.iter().filter(|(_, u)| u.team == enemy_team)
       .flat_map(|(pt, _)| pt.adj().into_iter())
-      .filter(|pt| self.rows[pt.y][pt.x] == b'.'
-                   && !self.units.iter().any(|(upt, _)| upt == pt))
+      .filter(|pt| self.is_unoccupied(pt))
       .collect()
   }
 
-  fn find_best_adj_enemy(&self, pt: &Point) -> Option<Point> {
-    let unit = self.find(pt);
-    let enemy_team = unit.enemy_team();
+  fn is_unoccupied(&self, pt: &Point) -> bool {
+      self.rows[pt.y][pt.x] == b'.'
+        && !self.units.iter().any(|(upt, _)| upt == pt)
+  }
+
+  fn find_best_adj_enemy(&self, pt: &Point, enemy_team: u8) -> Option<Point> {
     self.units.iter()
       .filter(|(upt, u)| u.team == enemy_team && upt.is_adj(pt))
       .min_by(|(upt0, u0), (upt1, u1)| {
@@ -237,7 +251,7 @@ impl<'a> Map<'a> {
       open.remove(&current);
       closed.insert(current.clone());
 
-      for neighbor in neighbors(&current, &nodes, &self.units) {
+      for neighbor in neighbors(&current, &nodes) {
         let neighbor_node = nodes.get_mut(&neighbor).unwrap();
         if closed.contains(&neighbor) { continue; }
         let neighbor_g = cur_g + 1;
@@ -259,9 +273,11 @@ impl<'a> Map<'a> {
   }
 
   fn nodes(&self, pt: &Point, ranges: &HashSet<Point>) -> Nodes {
-    self.enum_chars().filter_map(|(upt, ch)| {
-      if ch == b'.' || &upt == pt {
-        Some((upt.clone(), Node {
+    self.enum_chars()
+      .filter(|(upt, _)| self.is_unoccupied(&upt) || upt == pt)
+      .map(|(upt, _)| (
+        upt.clone(),
+        Node {
           loc: upt.clone(),
           prev: None,
           g: if &upt == pt { 0 } else { std::usize::MAX },
@@ -270,16 +286,12 @@ impl<'a> Map<'a> {
           } else {
             std::usize::MAX
           }
-        }))
-      } else {
-        None
-      }
-    }).collect()
+        }
+      ))
+      .collect()
   }
 
-  fn total_hp(&self) -> u32 {
-    self.units.iter().map(|v| v.1.hp).sum()
-  }
+  fn total_hp(&self) -> u32 { self.units.iter().map(|v| v.1.hp).sum() }
 }
 
 struct EnumChars<'a, 'm> {
@@ -321,7 +333,10 @@ struct Unit {
 }
 
 impl Unit {
-  pub fn init(team: u8) -> Unit { Unit { team, power: 3, hp: 200 } }
+  pub fn init(team: u8) -> Unit {
+    let power = if team == b'G' { 3 } else { 18 };
+    Unit { team, power, hp: 200 }
+  }
 
   pub fn enemy_team(&self) -> u8 {
     match self.team {
@@ -365,9 +380,6 @@ fn reconstruct(loc: &Point, nodes: &Nodes) -> Vec<Point> {
   vec.into_iter().rev().collect()
 }
 
-fn neighbors(cur: &Point, nodes: &Nodes, units: &Vec<(Point, Unit)>)
--> Vec<Point> {
-  cur.adj().into_iter().filter(|a| {
-    nodes.contains_key(&a) && !units.iter().any(|(upt, _)| upt == a)
-  }).collect()
+fn neighbors(cur: &Point, nodes: &Nodes) -> Vec<Point> {
+  cur.adj().into_iter().filter(|a| nodes.contains_key(&a)).collect()
 }

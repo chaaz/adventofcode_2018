@@ -109,3 +109,7 @@ Compulsively found the pathfinding algorithm with optimal worst-case:
 the modified _A\*_ here; but lost readability, writing time, best-case
 and avarage-case time, sanity in trade. Even missed some edge cases
 (which fortunately didn't come up in my problem input).
+
+I now have a cleaned-up version of part 1 with vastly simplified (and
+thus both more readable and performant) pathfinding, but it's probably
+still missing that edge case.
